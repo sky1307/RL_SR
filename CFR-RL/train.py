@@ -66,7 +66,9 @@ def central_agent(config, game, model_weights_queues, experience_queues):
                     assert np.any(np.isnan(critic_gradients[g])) == False, (
                         'critic_gradients', s_batch, a_batch, r_batch)
 
+
             if step % config.save_step == config.save_step - 1:
+                # Network.epsilon_heuristic = Network.epsilon_heuristic * Network.decay
                 network.save_ckpt(_print=True)
 
                 # log training information
@@ -81,61 +83,15 @@ def central_agent(config, game, model_weights_queues, experience_queues):
                     'avg reward': avg_reward,
                     'avg entropy': avg_entropy
                 }, step)
-                print('lr:%f, value loss:%f, avg reward:%f, avg entropy:%f' % (
-                    actor_learning_rate, avg_value_loss, avg_reward, avg_entropy))
+                print('lr:%f, value loss:%f, avg reward:%f, avg entropy:%f epsilon heuristic:%f' % (
+                    actor_learning_rate, avg_value_loss, avg_reward, avg_entropy, Network.epsilon_heuristic))
 
-        elif config.method == 'pure_policy':
-            # assemble experiences from the agents
-            s_batch = []
-            a_batch = []
-            r_batch = []
-            ad_batch = []
 
-            for i in range(FLAGS.num_agents):
-                s_batch_agent, a_batch_agent, r_batch_agent, ad_batch_agent = experience_queues[i].get()
-
-                assert len(s_batch_agent) == FLAGS.num_iter, \
-                    (len(s_batch_agent), len(a_batch_agent), len(r_batch_agent), len(ad_batch_agent))
-
-                s_batch += s_batch_agent
-                a_batch += a_batch_agent
-                r_batch += r_batch_agent
-                ad_batch += ad_batch_agent
-
-            assert len(s_batch) * game.max_moves == len(a_batch)
-            # used shared RMSProp, i.e., shared g
-            actions = np.eye(game.action_dim, dtype=np.float32)[np.array(a_batch)]
-            entropy, gradients = network.policy_train(np.array(s_batch),
-                                                      actions,
-                                                      np.vstack(ad_batch).astype(np.float32),
-                                                      config.entropy_weight)
-
-            if GRADIENTS_CHECK:
-                for g in range(len(gradients)):
-                    assert np.any(np.isnan(gradients[g])) == False, (s_batch, a_batch, r_batch)
-
-            if step % config.save_step == config.save_step - 1:
-                network.save_ckpt(_print=True)
-
-                # log training information
-                learning_rate = network.lr_schedule(network.optimizer.iterations.numpy()).numpy()
-                avg_reward = np.mean(r_batch)
-                avg_advantage = np.mean(ad_batch)
-                avg_entropy = np.mean(entropy)
-                network.inject_summaries({
-                    'learning rate': learning_rate,
-                    'avg reward': avg_reward,
-                    'avg advantage': avg_advantage,
-                    'avg entropy': avg_entropy
-                }, step)
-                print('lr:%f, avg reward:%f, avg advantage:%f, avg entropy:%f' % (
-                    learning_rate, avg_reward, avg_advantage, avg_entropy))
 
 
 def agent(agent_id, config, game, tm_subset, model_weights_queue, experience_queue):
     random_state = np.random.RandomState(seed=agent_id)
     network = Network(config, game.state_dims, game.action_dim, game.max_moves, master=False)
-
     # initial synchronization of the model weights from the coordinator 
     model_weights = model_weights_queue.get()
     network.model.set_weights(model_weights)
@@ -143,46 +99,53 @@ def agent(agent_id, config, game, tm_subset, model_weights_queue, experience_que
     s_batch = []
     a_batch = []
     r_batch = []
-    if config.method == 'pure_policy':
-        ad_batch = []
+
     run_iteration_idx = 0
     num_tms = len(tm_subset)
     random_state.shuffle(tm_subset)
     run_iterations = FLAGS.num_iter
-
+    filelog='log' + str(agent_id) +'.txt'
     while True:
         tm_idx = tm_subset[idx]
         # state
         state = game.get_state(tm_idx)
-        # print("s: ",state.shape)
         s_batch.append(state)
         # action
         if config.method == 'actor_critic':
             policy = network.actor_predict(np.expand_dims(state, 0)).numpy()[0]
-        elif config.method == 'pure_policy':
-            policy = network.policy_predict(np.expand_dims(state, 0)).numpy()[0]
+
         assert np.count_nonzero(policy) >= game.max_moves, (policy, state)
         if np.any(np.isnan(policy)):
             raise RuntimeError
         # actions = random_state.choice(game.action_dim, game.max_moves, p=policy, replace=False)
+        # actions = game.chooseActionfromPolicy(policy)
+        # print("eps", epsilon_heuristic)
+        # if np.random.random() < Network.epsilon_heuristic:
+        #     actions = game.heuristic(200, tm_idx)
+        # else:
+
         actions = game.chooseActionfromPolicy(policy)
+        # actions_h = game.heuristic(timeLimit=200, tm_idx= tm_idx)
+        old_mlu = game.old_mlu
         game.DoAction(actions, tm_idx)
+
         for ai in range(len(actions)):
             a_batch.append(actions[ai] + ai*game.num_nodes)
 
         # reward
-        reward = game.reward()
+        reward = game.reward(tm_idx)
         r_batch.append(reward)
 
-        if config.method == 'pure_policy':
-            # advantage
-            if config.baseline == 'avg':
-                ad_batch.append(game.advantage(tm_idx, reward))
-                game.update_baseline(tm_idx, reward)
-            elif config.baseline == 'best':
-                best_actions = policy.argsort()[-game.max_moves:]
-                best_reward = game.reward(tm_idx, best_actions)
-                ad_batch.append(reward - best_reward)
+        # log ----
+        f = open(filelog, 'a+')
+        f.write(f'topK    : {game.topK} \n')
+        # f.write(f'action_h: {actions_h} \n')
+        f.write(f'action  : {actions} \n')
+        # f.write(f'        : {A} \n')
+        f.write(f'tm_idx: {tm_idx} reward  : {reward}, old_mlu: {old_mlu}, new_max: {max(game.link_utilization)}\n')
+        f.close()
+
+
 
         run_iteration_idx += 1
         if run_iteration_idx >= run_iterations:
@@ -217,7 +180,6 @@ def main(_):
     tf.config.experimental.set_visible_devices([], 'GPU')
     tf.get_logger().setLevel('INFO')
     # tf.debugging.set_log_device_placement(True)
-
     config = get_config(FLAGS) or FLAGS
     env = Environment(config, is_training=True)
     game = CFRRL_Game(config, env)
@@ -235,7 +197,6 @@ def main(_):
     coordinator = mp.Process(target=central_agent, args=(config, game, model_weights_queues, experience_queues))
 
     coordinator.start()
-
     agents = []
     for i in range(FLAGS.num_agents):
         agents.append(mp.Process(target=agent,

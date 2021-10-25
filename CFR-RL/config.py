@@ -47,7 +47,8 @@ class Config(NetworkConfig):
 
     # For pure policy
     baseline = 'avg'  # avg, best
-
+    prob_heuristic = 0.9
+    decay_heuristic = 0.9
 
 def get_config(FLAGS):
     config = Config

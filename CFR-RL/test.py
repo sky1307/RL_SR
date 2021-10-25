@@ -84,57 +84,26 @@ def count_rc(solutions, crit_pairs, lp_links, num_pairs):
 
 
 def sim(config, network, game):
-    # mlus = []
-    # solutions = []
-    # crit_pairs = []
 
-    # f = open("test2_mt.txt", "w+")
-    # f_ = open("test1.txt", "w+")
+
+    f = open("PlotMAction1024.txt", "a+")
     for tm_idx in game.tm_indexes:
         state = game.get_state(tm_idx)
 
-        # for i in range(12):
-        #     for j in range(12):
-        #         f.write(str(game.traffic_matrices[tm_idx][i][j]))
-        #         f.write(' ')
-
-
         if config.method == 'actor_critic':
             policy = network.actor_predict(np.expand_dims(state, 0)).numpy()[0]
-        elif config.method == 'pure_policy':
-            policy = network.policy_predict(np.expand_dims(state, 0)).numpy()[0]
-        # actions = policy.argsort()[-game.max_moves:]
+
         actions = game.chooseActionfromPolicy(policy)
+        # actions_h = game.heuristic(timeLimit=200, tm_idx= tm_idx)
+
         game.DoAction(actions, tm_idx)
+        # print(game.normal_routing(tm_idx),' ', game.old_mlu,' ',max(game.link_utilization), )
+        # f.write(f'action  : {actions} \n')
 
-        # f_.write(f'{game.normal_routing(tm_idx)} {1 / game.reward()}\n')
-        # print(f"{game.normal_routing(tm_idx) : .3f} {1 / game.reward() : .3f} ")
+        f.write(f'{game.normal_routing(tm_idx)} {game.old_mlu} {max(game.link_utilization)}\n')
 
-        # u, solution, crit_pair = game.evaluate(tm_idx, actions, eval_delay=FLAGS.eval_delay)
-        # mlus.append(u)
-        # solutions.append(solution)
-        # crit_pairs.append(crit_pair)
+
     f.close()
-    # f_.close()
-    # mlus = np.asarray(mlus)
-    # num_rc = count_rc(solutions, crit_pairs=crit_pairs, lp_links=game.lp_links, num_pairs=game.num_pairs)
-    # print('----------------------------------- OVERALL RESULTS -------------------------------------------------------')
-    # print('CFR_RL   CFR_TOPK    TOPK     OPTIMAL    ECMP\n', np.mean(mlus, axis=0))
-    # print('RC CFR_RL  : Total: {}  -  Avg: {}'.format(np.sum(num_rc['cfr-rl']), np.mean(num_rc['cfr-rl'])))
-    # print('RC CFR_TOPK: Total: {}  -  Avg: {}'.format(np.sum(num_rc['cfr-topk']), np.mean(num_rc['cfr-topk'])))
-    # print('RC TOPK    : Total: {}  -  Avg: {}'.format(np.sum(num_rc['topk']), np.mean(num_rc['topk'])))
-    # print('RC OPTIMAL : Total: {}  -  Avg: {}'.format(np.sum(num_rc['optimal']), np.mean(num_rc['optimal'])))
-    #
-    # np.save('./results/{}_{}_{}_mlu'.format(config.dataset, config.max_moves, "cfr-rl"), mlus[:, 0])
-    # np.save('./results/{}_{}_{}_mlu'.format(config.dataset, config.max_moves, "cfr-topk"), mlus[:, 1])
-    # np.save('./results/{}_{}_{}_mlu'.format(config.dataset, config.max_moves, "topk"), mlus[:, 2])
-    # np.save('./results/{}_{}_{}_mlu'.format(config.dataset, config.max_moves, "optimal"), mlus[:, 3])
-    # np.save('./results/{}_{}_{}_mlu'.format(config.dataset, config.max_moves, "ecmp"), mlus[:, 4])
-    #
-    # np.save('./results/{}_{}_{}_rc'.format(config.dataset, config.max_moves, "cfr-rl"), num_rc['cfr-rl'])
-    # np.save('./results/{}_{}_{}_rc'.format(config.dataset, config.max_moves, "cfr-topk"), num_rc['cfr-topk'])
-    # np.save('./results/{}_{}_{}_rc'.format(config.dataset, config.max_moves, "topk"), num_rc['topk'])
-    # np.save('./results/{}_{}_{}_rc'.format(config.dataset, config.max_moves, "optimal"), num_rc['optimal'])
 
 
 def main(_):
