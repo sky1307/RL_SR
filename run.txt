@@ -1,0 +1,4 @@
+# Ubuntu 20.04, Python 3.8.5, Tensorflow v2.2.0, PuLP 2.3, networkx 2.5, tqdm 4.51.0
+python3 setup.py
+python3 train.py
+python3 test.py
